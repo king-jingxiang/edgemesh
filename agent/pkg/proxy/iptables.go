@@ -28,6 +28,7 @@ const (
 	None          string             = "None"
 	labelKubeDNS  string             = "k8s-app=kube-dns"
 	labelNoProxy  string             = "noproxy=edgemesh"
+	labelProxy    string             = "proxy=edgemesh"
 )
 
 // iptablesJumpChain encapsulates the iptables rule information,
@@ -192,6 +193,24 @@ func (proxier *Proxier) createIgnoreRules() (ignoreRules, expiredIgnoreRules []i
 		for _, item := range otherIgnoreServiceList.Items {
 			klog.V(4).Infof("ignored containing noproxy=edgemesh label service: %s", item.Name)
 			ignoreRulesIptablesEnsureMap[strings.Join([]string{item.Namespace, item.Name}, ".")] = item.DeepCopy()
+		}
+	}
+
+	// Other services we want to ignore(which service has not proxy=edgemesh label)...
+	serviceList, err := proxier.kubeClient.CoreV1().Services("").List(context.Background(), metav1.ListOptions{})
+	proxyServiceList, err := proxier.kubeClient.CoreV1().Services("").List(context.Background(), metav1.ListOptions{LabelSelector: labelProxy})
+	if err != nil && !util.IsNotFoundError(err) {
+		klog.Warningf("failed to list service labeled with proxy=edgemesh, err: %v", err)
+	} else {
+		proxyServiceMap := map[string]corev1.Service{}
+		for _, item := range proxyServiceList.Items {
+			proxyServiceMap[strings.Join([]string{item.Namespace, item.Name}, ".")] = item
+		}
+		for _, item := range serviceList.Items {
+			if _, found := proxyServiceMap[strings.Join([]string{item.Namespace, item.Name}, ".")]; !found {
+				klog.V(4).Infof("ignored no proxy=edgemesh label service: %s", item.Name)
+				ignoreRulesIptablesEnsureMap[strings.Join([]string{item.Namespace, item.Name}, ".")] = item.DeepCopy()
+			}
 		}
 	}
 
